@@ -1,0 +1,109 @@
+### Instruction
+(* Stand-alone Example 1: Write a function that doubles a number. Test case 1: double 3 = 6. Prove some formal properties. *) 
+Fixpoint double (n: nat): nat := match n with | 0 => 0 | S n => S (S (double n)) end. 
+
+Lemma example_double_3: double 3 = 6.
+Proof. simpl. reflexivity. Qed. 
+
+ Theorem theorem_double_distribute: 
+forall a b, double a + double b = double (a + b).
+ Proof.
+ intros.
+ induction a.
+ - simpl. reflexivity.
+ - simpl. rewrite IHa. reflexivity. 
+ Qed. 
+
+ (* Stand-alone Example 2: Write a function that creates a list of n elements. Test case 1: replicate 1 0 = []. Test case 2: replicate 1 2 = [1; 1]. Prove some formal properties. *) 
+ Require Import Coq.Lists.List. 
+ Open Scope list_scope. 
+ Import ListNotations. 
+ Fixpoint replicate {X: Type} (x: X) (n: nat): list X := 
+ match n with 
+ | 0 => []
+ | S n => x :: replicate x n 
+ end. 
+ Lemma example_replicate_0: replicate 1 0 = []. 
+ Proof. simpl. reflexivity. Qed.
+ Lemma example_replicate_2: replicate 1 2 = [1; 1].
+ Proof. simpl. reflexivity. Qed.
+
+ Theorem replicate_length:
+	 forall n, length (replicate 1 n) = n.
+ Proof. 
+ intros. 
+ induction n.
+ - simpl. reflexivity. 
+ - simpl. rewrite IHn. reflexivity.
+ Qed. 
+ Theorem replicate_length_any: 
+	 forall (X: Type) (x: X) n, length (replicate x n) = n. 
+ Proof.
+ intros. 
+ induction n.
+ - simpl. reflexivity.
+- simpl. rewrite IHn. reflexivity.
+ Qed.
+
+(* Stand-alone Example 3: Write a function that checks if a given string is a palindrome.Test case 1: is_palindrome "racecar" = true, test case 2: is_palindrome "hello" = false, test case 3: is_palindrome "" = true Prove some formal properties. Please only write code for the last stand-alone example. *)
+
+
+### Output
+Require Import Coq.Lists.List.
+Open Scope list_scope.
+Import ListNotations.
+
+Require Import Coq.Strings.String.
+Open Scope string_scope.
+
+Fixpoint reverse_string (s: string): string :=
+  match s with
+  | EmptyString => EmptyString
+  | String c s' => append (reverse_string s') (String c EmptyString)
+  end.
+
+Definition is_palindrome (s: string): bool :=
+  eqb_string s (reverse_string s).
+
+Lemma example_is_palindrome_racecar: is_palindrome "racecar" = true.
+Proof. simpl. reflexivity. Qed.
+
+Lemma example_is_palindrome_hello: is_palindrome "hello" = false.
+Proof. simpl. reflexivity. Qed.
+
+Lemma example_is_palindrome_empty: is_palindrome "" = true.
+Proof. simpl. reflexivity. Qed.
+
+Lemma reverse_string_append_distr:
+  forall s1 s2 : string, reverse_string (append s1 s2) = append (reverse_string s2) (reverse_string s1).
+Proof.
+  intros.
+  induction s1.
+  - simpl. rewrite (append_nil_r). reflexivity.
+  - simpl. rewrite (IHs1). rewrite (append_assoc). reflexivity.
+Qed.
+
+Theorem reverse_string_involutive:
+  forall s: string, reverse_string (reverse_string s) = s.
+Proof.
+  intros.
+  induction s.
+  - simpl. reflexivity.
+  - simpl. rewrite <- (append_assoc).
+    rewrite (reverse_string_append_distr (reverse_string s)1 (String a EmptyString)).
+    simpl. rewrite IHs. reflexivity.
+Qed.
+
+Theorem is_palindrome_correct:
+  forall s: string, is_palindrome s = true <-> s = reverse_string s.
+Proof.
+  intros.
+  unfold is_palindrome.
+  split.
+  - intro H.
+    apply eqb_string_iff in H.
+    apply H.
+  - intro H.
+    apply eqb_string_iff in H.
+    apply H.
+Qed.
