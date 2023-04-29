@@ -24,6 +24,14 @@ import json
 import requests
 import re
 
+import yaml
+
+with open('../config.yaml', 'r') as file:
+    api_key = yaml.safe_load(file)
+
+openai.organization = "org-f2tK1brD8eM1W91o2X5WgNoy"
+openai.api_key = api_key
+
 def coqc(v):
   '''
   Returns line number of first error. -2 iff no errors, and -1 otherwise.
@@ -118,9 +126,6 @@ multishot = "(* Stand-alone Example 1: Write a function that doubles a number. T
 
 # We retrieve the dataloader by calling the `build_dataset` function.
 dataset = build_dataset(config)
-
-openai.organization = "org-f2tK1brD8eM1W91o2X5WgNoy"
-openai.api_key = "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"
 
 systemText = """ You are an AI assistant helping users write Coq code in order to implement given function specifications. 
 1. The program you write should only contain Coq code in response to the given function specification. 
