@@ -26,6 +26,8 @@ import re
 
 import yaml
 
+from langchain.memory import ConversationBufferWindowMemory
+
 with open('../config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
