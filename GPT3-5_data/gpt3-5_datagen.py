@@ -1,15 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Optional
-
 import torch
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, HfArgumentParser, pipeline
-
 from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer, set_seed
 from trl.core import LengthSampler
-
 import os
 import openai
 from tenacity import (
@@ -18,15 +15,12 @@ from tenacity import (
     wait_random_exponential,
     wait_fixed
 )  # for exponential backoff
-
 import json
-
 import requests
 import re
-
 import yaml
-
 from langchain.memory import ConversationBufferWindowMemory
+import tiktoken as tk
 
 with open('../config.yaml', 'r') as file:
     config = yaml.safe_load(file)
@@ -213,13 +207,24 @@ Require Import Coq.Lists.List.
 
 messages=[{"role": "system", "content": systemText}]
 
+def add_to_memory(resp):
+  # make sure we are uner the token limit.
+  # remove earlier model/user interactions, not the system text
+  if len(messages) > 5:
+    _ = messages.pop(1)
+  messages.append(resp)
+  
+def passes_testcases(resp):
+  return True
+
 @retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(20)) #wait_random_exponential(min=20, max=50)
 def generate(q):
     '''
     Generate output from the correct model and clean it from pre- and post- rambles if possible.
     ''' 
     # make this script retry if the connection is rejected for some reason
-    messages.append({"role": "user", "content": q})
+    add_to_memory({"role": "user", "content": q})
+    print("the length of the messages dict: {}".format(len(messages)))
     response = openai.ChatCompletion.create(
                         model='gpt-3.5-turbo', 
                         messages=messages)
@@ -238,9 +243,8 @@ def generate(q):
     except:
         pass
     
-    messages.append({"role": "assistant", "content": response})
+    add_to_memory({"role": "assistant", "content": response})
     return c_response
-
 
 def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   '''
@@ -253,6 +257,7 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
     print("The task: {}".format(q))
 
   for t in range(ntrials): 
+    passchecks = False
     # for recording the dataset
     out = {
             "prompt_id": pid,
@@ -284,23 +289,34 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
       line_number = get_linenumber(cf) - 1
       total_lines = get_totallines(response)
       percent_compiled = (line_number)/total_lines
-      linetxt = get_line(line_number, response)
+      linetxt = get_line(line_number + 1, response)
 
       # get the model to reflect on the error
-      q = "Your code produces an error in the line {}\n{}Can you please explain what this error means? Let's think step by step. Please rewrite all code if you rewrite any code."\
-        .format(linetxt, cf)
+      q = "Your code produces an error in the line {}: {}\n{}Can you please explain what this error means? Let's think step by step. Please rewrite all code if you rewrite any code."\
+        .format(line_number + 1, linetxt, cf)
       if verbose:
         print(q)
         print(percent_compiled)
     else:
-      total_lines = get_totallines(response)
-      line_number = total_lines
-      percent_compiled = 1.0
-      q = "The model solved the problem!"
-      if verbose:
-        print(q)
-        print(percent_compiled)
-
+      # check for validity of solution, reprompt to actually answer problem.
+      if passes_testcases(response):
+        passchecks = True
+        total_lines = get_totallines(response)
+        line_number = total_lines
+        percent_compiled = 1.0
+        q = "The model solved the problem!"
+        if verbose:
+          print(q)
+          print(percent_compiled)
+      else:
+        total_lines = get_totallines(response)
+        line_number = total_lines
+        percent_compiled = 1.0
+        q = "The model solved the problem!"
+        if verbose:
+          print(q)
+          print(percent_compiled)
+        
     # append all data to json lines file
     out["output"] = response
     out["compiler_feedback"] = cf
@@ -314,13 +330,13 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
       print("recorded in {}".format(outfile))
 
     # don't continue if model has completely solved problem
-    if cf is None:
+    if cf is None and passchecks:
       break
 
   return None
 
 if __name__ == "__main__":
-  outfile = "gpt3-5_coqMBPPTrain01.ndjson"
+  outfile = "gpt3-5_coqMBPPTrain02.ndjson"
   # run_trial(q, 0, outfile)
   for i in range(len(dataset)):
     messages=[{"role": "system", "content": systemText}]
