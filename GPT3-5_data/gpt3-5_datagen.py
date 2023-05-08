@@ -26,12 +26,6 @@ import re
 
 import yaml
 
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_random_exponential,
-)  # for exponential backoff
-
 with open('../config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
@@ -95,7 +89,7 @@ config = PPOConfig(
 # We set `return_all_scores` to True to get the sentiment score for each token.
 sent_kwargs = {"return_all_scores": True, "function_to_apply": "none", "batch_size": config.mini_batch_size}
 
-def build_dataset(config, dataset_name="../MBPP dataset/MBPP_Coq_Train.csv"):
+def build_dataset(config, dataset_name="../MBPP dataset/MBPP_Coq_Test.csv"):
     """
     Build dataset for training. This builds the dataset from `load_dataset`, one should
     customize this function to train the model on its own dataset.
@@ -218,8 +212,7 @@ Require Import Coq.Lists.List.
 messages=[{"role": "system", "content": systemText}]
 
 # TODO: use the ConversationBufferMemory from Langchain here.
- 
-@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(20))
+
 def generate(q):
   '''
   Generate output from the correct model and clean it from pre- and post- rambles if possible.
@@ -228,7 +221,7 @@ def generate(q):
   # TODO: use exponential backoff here
   messages.append({"role": "user", "content": q})
   response = openai.ChatCompletion.create(
-                model='gpt-4-0314', 
+                model='gpt-3.5-turbo', 
                 messages=messages)
   response = response.choices[0].message.content
   # messages.append({"role": "assistant", "content": response})
@@ -326,7 +319,7 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   return None
 
 if __name__ == "__main__":
-  outfile = "gpt4_coqMBPPTrain01.ndjson"
+  outfile = "gpt3-5_coqMBPPTest01.ndjson"
   # run_trial(q, 0, outfile)
   for i in range(len(dataset)):
     messages=[{"role": "system", "content": systemText}]
