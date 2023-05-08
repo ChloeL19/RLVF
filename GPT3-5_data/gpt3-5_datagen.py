@@ -26,20 +26,13 @@ import re
 
 import yaml
 
-<<<<<<< HEAD
-=======
 from langchain.memory import ConversationBufferWindowMemory
 
->>>>>>> 2e937f08d4c2b8ae23baaa474ff8b5cef4c85f9b
 with open('../config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 openai.organization = "org-f2tK1brD8eM1W91o2X5WgNoy"
-<<<<<<< HEAD
 openai.api_key = config['OPENAI_KEY']
-=======
-openai.api_key = config["API_KEY"]
->>>>>>> 2e937f08d4c2b8ae23baaa474ff8b5cef4c85f9b
 
 def coqc(v):
   '''
@@ -98,11 +91,7 @@ config = PPOConfig(
 # We set `return_all_scores` to True to get the sentiment score for each token.
 sent_kwargs = {"return_all_scores": True, "function_to_apply": "none", "batch_size": config.mini_batch_size}
 
-<<<<<<< HEAD
-def build_dataset(config, dataset_name="../MBPP dataset/MBPP_Coq_Test.csv"):
-=======
 def build_dataset(config, dataset_name="../MBPP dataset/MBPP_Coq_Train.csv"):
->>>>>>> 2e937f08d4c2b8ae23baaa474ff8b5cef4c85f9b
     """
     Build dataset for training. This builds the dataset from `load_dataset`, one should
     customize this function to train the model on its own dataset.
@@ -224,37 +213,6 @@ Require Import Coq.Lists.List.
 
 messages=[{"role": "system", "content": systemText}]
 
-<<<<<<< HEAD
-# TODO: use the ConversationBufferMemory from Langchain here.
-
-def generate(q):
-  '''
-  Generate output from the correct model and clean it from pre- and post- rambles if possible.
-  ''' 
-  # make this script retry if the connection is rejected for some reason
-  # TODO: use exponential backoff here
-  messages.append({"role": "user", "content": q})
-  response = openai.ChatCompletion.create(
-                model='gpt-3.5-turbo', 
-                messages=messages)
-  response = response.choices[0].message.content
-  # messages.append({"role": "assistant", "content": response})
-  
-  # clean the response if possible
-  c_response = response
-  try:
-    match = re.search('```coq(.*?)```', c_response, re.DOTALL)
-    c_response = match.group(1)
-  except:
-    pass
-  try:
-    match = re.search('```(.*?)```', c_response, re.DOTALL)
-    c_response = match.group(1)
-  except:
-    pass
-  messages.append({"role": "assistant", "content": response})
-  return c_response
-=======
 @retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(20)) #wait_random_exponential(min=20, max=50)
 def generate(q):
     '''
@@ -283,7 +241,6 @@ def generate(q):
     messages.append({"role": "assistant", "content": response})
     return c_response
 
->>>>>>> 2e937f08d4c2b8ae23baaa474ff8b5cef4c85f9b
 
 def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   '''
@@ -363,11 +320,7 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   return None
 
 if __name__ == "__main__":
-<<<<<<< HEAD
-  outfile = "gpt3-5_coqMBPPTest01.ndjson"
-=======
   outfile = "gpt3-5_coqMBPPTrain01.ndjson"
->>>>>>> 2e937f08d4c2b8ae23baaa474ff8b5cef4c85f9b
   # run_trial(q, 0, outfile)
   for i in range(len(dataset)):
     messages=[{"role": "system", "content": systemText}]
