@@ -28,29 +28,14 @@ with open('../config.yaml', 'r') as file:
 openai.organization = "org-f2tK1brD8eM1W91o2X5WgNoy"
 openai.api_key = config['OPENAI_KEY']
 
-def coqc(v):
-  '''
-  Returns line number of first error. -2 iff no errors, and -1 otherwise.
-  '''
-  r = requests.post("https://coq.livecode.ch/check", data = { 'v': v }).json()
-  r.raise_for_status()
-  if r['status'] == 0:
-    return -2
-  r = r['log']
-
-  pattern = r'line (\d+),'
-  match = re.search(pattern, r)  
-  if match:
-    line_number = int(match.group(1))
-  else:
-    line_number = -1
-  return line_number
-
 def cfeedback(v):
   '''
   Returns the compiler error if one exists. Returns None if everything compiles cleanly.
   '''
-  r = requests.post("https://coq.livecode.ch/check", data = { 'v': v }).json()
+  r = requests.post("https://coq.livecode.ch/check", data = { 'v': v })
+  r.raise_for_status()
+  r = r.json()
+  
   if r['status'] == 0:
     return None
   r = r['log']
@@ -72,20 +57,7 @@ def get_line(line_number, response):
     broken = response.split('\n')
     return broken[line_number-1]
 
-config = PPOConfig(
-    model_name="edbeeching/gpt-neo-125M-imdb-lora-adapter-merged",
-    learning_rate=1.41e-5,
-    log_with='wandb',
-    mini_batch_size=1,# prev: 16
-    batch_size=1, # prev: 256, but working with super limited samples so will try lower batch size for now
-    # gradient_accumulation_steps=1, --> apparently this is unrecognized
-)
-
-# We then define the arguments to pass to the sentiment analysis pipeline.
-# We set `return_all_scores` to True to get the sentiment score for each token.
-sent_kwargs = {"return_all_scores": True, "function_to_apply": "none", "batch_size": config.mini_batch_size}
-
-def build_dataset(config, dataset_name="../MBPP dataset/MBPP_Coq_Train.csv"):
+def build_dataset(dataset_name):
     """
     Build dataset for training. This builds the dataset from `load_dataset`, one should
     customize this function to train the model on its own dataset.
@@ -96,33 +68,19 @@ def build_dataset(config, dataset_name="../MBPP dataset/MBPP_Coq_Train.csv"):
         dataloader (`torch.utils.data.DataLoader`):
             The dataloader for the dataset.
     """
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-    tokenizer.pad_token = tokenizer.eos_token
     ds = load_dataset("csv", data_files=dataset_name, split="train")
 
     def concat(sample):
-      ex = sample['specification'] + "Test case 1: " + sample['test_case_1'] + \
+      sample["query"] = sample['specification'] + "Test case 1: " + sample['test_case_1'] + \
       ", test case 2: " + sample['test_case_2'] + ", test case 3: " + sample['test_case_3']
-      return ex
+      return sample
 
-      # return sample['specification'] + "Test case 1: " + sample['test_case_1'] + \
-      # ", test case 2: " + sample['test_case_2'] + ", test case 3: " + sample['test_case_3'] + " Prove some formal properties. Please only write code for the last stand-alone example. *)"
-
-
-    def tokenize(sample):
-        sample["input_ids"] = tokenizer.encode(concat(sample))
-        sample["query"] = tokenizer.decode(sample["input_ids"])
-        return sample
-
-    ds = ds.map(tokenize, batched=False)
+    ds = ds.map(concat, batched=False)
     ds.set_format(type="torch")
     return ds
 
-# multi-shot boilerplate
-multishot = "(* Stand-alone Example 1: Write a function that doubles a number. Test case 1: double 3 = 6. Prove some formal properties. *) \nFixpoint double (n: nat): nat := match n with | 0 => 0 | S n => S (S (double n)) end. \n\nLemma example_double_3: double 3 = 6.\nProof. simpl. reflexivity. Qed. \n\n Theorem theorem_double_distribute: \nforall a b, double a + double b = double (a + b).\n Proof.\n intros.\n induction a.\n - simpl. reflexivity.\n - simpl. rewrite IHa. reflexivity. \n Qed. \n\n (* Stand-alone Example 2: Write a function that creates a list of n elements. Test case 1: replicate 1 0 = []. Test case 2: replicate 1 2 = [1; 1]. Prove some formal properties. *) \n Require Import Coq.Lists.List. \n Open Scope list_scope. \n Import ListNotations. \n Fixpoint replicate {X: Type} (x: X) (n: nat): list X := \n match n with \n | 0 => []\n | S n => x :: replicate x n \n end. \n Lemma example_replicate_0: replicate 1 0 = []. \n Proof. simpl. reflexivity. Qed.\n Lemma example_replicate_2: replicate 1 2 = [1; 1].\n Proof. simpl. reflexivity. Qed.\n\n Theorem replicate_length:\n\t forall n, length (replicate 1 n) = n.\n Proof. \n intros. \n induction n.\n - simpl. reflexivity. \n - simpl. rewrite IHn. reflexivity.\n Qed. \n Theorem replicate_length_any: \n\t forall (X: Type) (x: X) n, length (replicate x n) = n. \n Proof.\n intros. \n induction n.\n - simpl. reflexivity.\n- simpl. rewrite IHn. reflexivity.\n Qed."
-
 # We retrieve the dataloader by calling the `build_dataset` function.
-dataset = build_dataset(config)
+dataset = build_dataset("../MBPP dataset/MBPP_Coq_Train.csv")
 
 systemText = """ You are an AI assistant helping users write Coq code in order to implement given function specifications. 
 1. The program you write should only contain Coq code in response to the given function specification. 
@@ -215,6 +173,9 @@ def add_to_memory(resp):
   messages.append(resp)
   
 def passes_testcases(resp):
+  '''
+  TODO: checks that a model's output has met the specification even if it compiles.
+  '''
   return True
 
 @retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(20)) #wait_random_exponential(min=20, max=50)
@@ -249,8 +210,9 @@ def generate(q):
 def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   '''
   Runs one trial on one prompt. 
-  - q: function spec with test cases
+  - q_core: function spec with test cases
   - pid: the prompt id
+  - outfile: where to save logging results
   '''
   q = q_core
   if verbose:
@@ -276,10 +238,7 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
     response = generate(q)
 
     # get compiler feedback
-    try:
-      cf = cfeedback(response)
-    except:
-      print("The weird response: {}".format(response))
+    cf = cfeedback(response)
 
     if verbose:
       print("-----Attempt {}---------".format(t))
@@ -309,6 +268,8 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
           print(q)
           print(percent_compiled)
       else:
+        # TODO: fix this part, we need to remprompt the model again to get 
+        # back on track
         total_lines = get_totallines(response)
         line_number = total_lines
         percent_compiled = 1.0
