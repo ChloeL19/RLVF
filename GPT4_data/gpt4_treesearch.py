@@ -21,12 +21,39 @@ import re
 import yaml
 from langchain.memory import ConversationBufferWindowMemory
 import tiktoken as tk
+from queue import PriorityQueue
 
 with open('../config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 openai.organization = "org-f2tK1brD8eM1W91o2X5WgNoy"
 openai.api_key = config['OPENAI_KEY']
+
+N = 3 # number of choices per query
+
+# https://stackoverflow.com/a/57487294/34596
+class _Wrapper:
+    def __init__(self, item, key):
+        self.item = item
+        self.key = key
+
+    def __lt__(self, other):
+        return self.key(self.item) < other.key(other.item)
+
+    def __eq__(self, other):
+        return self.key(self.item) == other.key(other.item)
+class KeyPriorityQueue(PriorityQueue):
+    def __init__(self, key):
+        self.key = key
+        super().__init__()
+
+    def _get(self):
+        wrapper = super()._get()
+        return wrapper.item
+
+    def _put(self, item):
+        super()._put(_Wrapper(item, self.key))
+
 
 def cfeedback(v):
   '''
@@ -163,14 +190,27 @@ Require Import Coq.Lists.List.
  Qed.
 \`\`\`"""
 
-messages=[{"role": "system", "content": systemText}]
+done = None
 
-def add_to_memory(resp):
+init_messages=[{"role": "system", "content": systemText}]
+
+taskqueue = None
+
+def init(q):
+  global done
+  global taskqueue
+  done = None
+  taskqueue = KeyPriorityQueue(key=lambda x: x[0])
+  taskqueue.put(((0, 0), (init_messages, q)))
+
+def add_to_memory(prev_messages, resp):
+  messages = prev_messages.copy()
   # make sure we are uner the token limit.
   # remove earlier model/user interactions, not the system text
   if len(messages) > 5:
     _ = messages.pop(1)
   messages.append(resp)
+  return messages
   
 def passes_testcases(resp):
   '''
@@ -178,34 +218,129 @@ def passes_testcases(resp):
   '''
   return True
 
+def cleanup_response(choice):
+  response = choice.message.content
+  c_response = response
+  try:
+      match = re.search('```coq(.*?)```', c_response, re.DOTALL)
+      c_response = match.group(1)
+  except:
+      pass
+  try:
+      match = re.search('```(.*?)```', c_response, re.DOTALL)
+      c_response = match.group(1)
+  except:
+      pass
+  return c_response
+
 @retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(100)) #wait_random_exponential(min=20, max=50)
-def generate(q):
+def generate(messages):
     '''
     Generate output from the correct model and clean it from pre- and post- rambles if possible.
     ''' 
     # make this script retry if the connection is rejected for some reason
-    add_to_memory({"role": "user", "content": q})
     print("the length of the messages dict: {}".format(len(messages)))
     response = openai.ChatCompletion.create(
                         model='gpt-4', 
-                        messages=messages)
-    response = response.choices[0].message.content
+                        messages=messages,
+                        n=N)
+    return response.choices.map(cleanup_response)
 
-    # clean the response if possible
-    c_response = response
-    try:
-        match = re.search('```coq(.*?)```', c_response, re.DOTALL)
-        c_response = match.group(1)
-    except:
-        pass
-    try:
-        match = re.search('```(.*?)```', c_response, re.DOTALL)
-        c_response = match.group(1)
-    except:
-        pass
-    
-    add_to_memory({"role": "assistant", "content": response})
-    return c_response
+def generate_stub(messages):
+  choices = [
+      "foo", "bar", "baz", "foo\nbar",
+      "Check 1.\nCheck 2.\n",
+      "Lemma foo: 1 = 1. Proof. reflexivity. Qed."]
+  import random
+  return random.choices(choices, k=N)
+
+def handle1(pid, outfile, verbose=True):
+  assert(not taskqueue.empty())
+  (_, (messages, q)) = taskqueue.get()
+  responses = generate(messages)
+  for response in responses:
+    if enqueue(messages, response, q, pid, outfile, verbose=verbose):
+      break
+
+def enqueue(messages, response, q, pid, outfile, verbose=True):
+  global done
+  passchecks = False
+  messages = add_to_memory(messages, {"role": "assistant", "content": response})
+
+  # get compiler feedback
+  cf = cfeedback(response)
+
+  # for recording the dataset
+  out = {
+          "prompt_id": pid,
+          "instruction": q,
+          "output": None,
+          "compiler_feedback": None,
+          "stats": {
+                      "total_lines" : None,
+                      "compiled_lines": None,
+                      "percent_compiled": None
+                  }
+          }
+
+  if verbose:
+    print("-----Attempt ---------")
+    print(response)
+
+  if cf is not None:
+    line_number = get_linenumber(cf) - 1
+    total_lines = get_totallines(response)
+    percent_compiled = (line_number)/total_lines
+    linetxt = get_line(line_number + 1, response)
+
+    # get the model to reflect on the error
+    q = "Your code produces an error in the line {}: {}\n{}Can you please explain what this error means? Let's think step by step. Please rewrite all code if you rewrite any code."\
+      .format(line_number + 1, linetxt, cf)
+    if verbose:
+      print(q)
+      print(percent_compiled)
+  else:
+    # check for validity of solution, reprompt to actually answer problem.
+    if passes_testcases(response):
+      passchecks = True
+      total_lines = get_totallines(response)
+      line_number = total_lines
+      percent_compiled = 1.0
+      q = "The model solved the problem!"
+      done = out
+      if verbose:
+        print(q)
+        print(percent_compiled)
+    else:
+      # TODO: fix this part, we need to remprompt the model again to get 
+      # back on track
+      total_lines = get_totallines(response)
+      line_number = total_lines
+      percent_compiled = 1.0
+      q = "The model solved the problem!"
+      done = out
+      if verbose:
+        print(q)
+        print(percent_compiled)
+
+  # append all data to json lines file
+  out["output"] = response
+  out["compiler_feedback"] = cf
+  out["stats"]["total_lines"] = total_lines
+  out["stats"]["compiled_lines"] = line_number
+  out["stats"]["percent_compiled"] = percent_compiled
+
+  with open(outfile, 'a') as file:
+    file.write(json.dumps(out) + '\n')
+  if verbose:
+    print("recorded in {}".format(outfile))
+
+  if done is not None:
+      return True
+  else:
+      messages = add_to_memory(messages, {"role": "user", "content": q})
+      taskqueue.put(((-percent_compiled, -line_number), (messages, q)))
+      return False
 
 def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   '''
@@ -218,88 +353,16 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   if verbose:
     print("The task: {}".format(q))
 
-  for t in range(ntrials): 
-    passchecks = False
-    # for recording the dataset
-    out = {
-            "prompt_id": pid,
-            "iteration": t,
-            "instruction": q,
-            "output": None,
-            "compiler_feedback": None,
-            "stats": {
-                        "total_lines" : None,
-                        "compiled_lines": None,
-                        "percent_compiled": None
-                    }
-            }
-
-    # generate model response
-    response = generate(q)
-
-    # get compiler feedback
-    cf = cfeedback(response)
-
-    if verbose:
-      print("-----Attempt {}---------".format(t))
-      print(response)
-
-    if cf is not None:
-      line_number = get_linenumber(cf) - 1
-      total_lines = get_totallines(response)
-      percent_compiled = (line_number)/total_lines
-      linetxt = get_line(line_number + 1, response)
-
-      # get the model to reflect on the error
-      q = "Your code produces an error in the line {}: {}\n{}Can you please explain what this error means? Let's think step by step. Please rewrite all code if you rewrite any code."\
-        .format(line_number + 1, linetxt, cf)
-      if verbose:
-        print(q)
-        print(percent_compiled)
-    else:
-      # check for validity of solution, reprompt to actually answer problem.
-      if passes_testcases(response):
-        passchecks = True
-        total_lines = get_totallines(response)
-        line_number = total_lines
-        percent_compiled = 1.0
-        q = "The model solved the problem!"
-        if verbose:
-          print(q)
-          print(percent_compiled)
-      else:
-        # TODO: fix this part, we need to remprompt the model again to get 
-        # back on track
-        total_lines = get_totallines(response)
-        line_number = total_lines
-        percent_compiled = 1.0
-        q = "The model solved the problem!"
-        if verbose:
-          print(q)
-          print(percent_compiled)
-        
-    # append all data to json lines file
-    out["output"] = response
-    out["compiler_feedback"] = cf
-    out["stats"]["total_lines"] = total_lines
-    out["stats"]["compiled_lines"] = line_number
-    out["stats"]["percent_compiled"] = percent_compiled
-
-    with open(outfile, 'a') as file:
-      file.write(json.dumps(out) + '\n')
-    if verbose:
-      print("recorded in {}".format(outfile))
-
-    # don't continue if model has completely solved problem
-    if cf is None and passchecks:
-      break
+  for t in range(ntrials):
+    handle1(pid, outfile, verbose=verbose)
+    if done is not None:
+      return done
 
   return None
 
 if __name__ == "__main__":
-  outfile = "gpt4_coqMBPPTrain01.ndjson"
-  # run_trial(q, 0, outfile)
-  for i in range(len(dataset)):
-    messages=[{"role": "system", "content": systemText}]
+  outfile = "my_gpt4_coqMBPPTrain01.ndjson"
+  for i in [3]:#range(len(dataset)):
     q = dataset[i]['query'] 
+    init(q)
     run_trial(q, i, outfile)
