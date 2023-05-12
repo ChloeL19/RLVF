@@ -80,7 +80,7 @@ def build_dataset(dataset_name):
     return ds
 
 # We retrieve the dataloader by calling the `build_dataset` function.
-dataset = build_dataset("../MBPP dataset/MBPP_Coq_Test.csv")
+dataset = build_dataset("../MBPP dataset/MBPP_Coq_Train.csv")
 
 systemText = """ You are an AI assistant helping users write Coq code in order to implement given function specifications. 
 1. The program you write should only contain Coq code in response to the given function specification. 
@@ -178,7 +178,7 @@ def passes_testcases(resp):
   '''
   return True
 
-@retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(20)) #wait_random_exponential(min=20, max=50)
+@retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(100)) #wait_random_exponential(min=20, max=50)
 def generate(q):
     '''
     Generate output from the correct model and clean it from pre- and post- rambles if possible.
@@ -187,7 +187,7 @@ def generate(q):
     add_to_memory({"role": "user", "content": q})
     print("the length of the messages dict: {}".format(len(messages)))
     response = openai.ChatCompletion.create(
-                        model='gpt-3.5-turbo', 
+                        model='gpt-4', 
                         messages=messages)
     response = response.choices[0].message.content
 
@@ -297,7 +297,7 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   return None
 
 if __name__ == "__main__":
-  outfile = "gpt3-5_coqMBPPTest01.ndjson"
+  outfile = "gpt4_coqMBPPTrain01.ndjson"
   # run_trial(q, 0, outfile)
   for i in range(len(dataset)):
     messages=[{"role": "system", "content": systemText}]
