@@ -234,17 +234,19 @@ def cleanup_response(choice):
   return c_response
 
 @retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(100)) #wait_random_exponential(min=20, max=50)
+def generate_raw(messages):
+    return openai.ChatCompletion.create(
+        model='gpt-4', 
+        messages=messages,
+        n=N)
 def generate(messages):
     '''
     Generate output from the correct model and clean it from pre- and post- rambles if possible.
     ''' 
     # make this script retry if the connection is rejected for some reason
     print("the length of the messages dict: {}".format(len(messages)))
-    response = openai.ChatCompletion.create(
-                        model='gpt-4', 
-                        messages=messages,
-                        n=N)
-    return response.choices.map(cleanup_response)
+    response = generate_raw(messages)
+    return map(cleanup_response, response.choices)
 
 def generate_stub(messages):
   choices = [
@@ -362,7 +364,7 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
 
 if __name__ == "__main__":
   outfile = "my_gpt4_coqMBPPTrain01.ndjson"
-  for i in [3]:#range(len(dataset)):
+  for i in [1]:#range(len(dataset)):
     q = dataset[i]['query'] 
     init(q)
     run_trial(q, i, outfile)
