@@ -21,6 +21,7 @@ import re
 import yaml
 from langchain.memory import ConversationBufferWindowMemory
 import tiktoken as tk
+import numpy as np
 
 from transformers import GPTJForCausalLM
 
@@ -97,11 +98,26 @@ systemText = """ You are an AI assistant helping users write Coq code in order t
 
 The following are examples.
 
-Query from user:
-Write a function that creates a list of n elements. Test case 1: replicate 1 0 = []. Test case 2: replicate 1 2 = [1; 1]. 
+### Instruction:
+{task} 
 
-Response from assistant:
-\`\`\`
+### Response:
+{attempt}
+
+### Instruction:
+{feedback}
+
+### Response:
+{revision}
+
+### Instruction:
+{instruction}
+
+### Response:
+"""
+
+initialTask = "Write a function that creates a list of n elements. Test case 1: replicate 1 0 = []. Test case 2: replicate 1 2 = [1; 1]."
+initialAttempt = """
 Require Import Coq.Lists.List. 
  Open Scope list_scope. 
  Import ListNotations. 
@@ -131,18 +147,14 @@ Require Import Coq.Lists.List.
  - simpl. reflexivity.
 - simpl. rewrite IHn. reflexivity.
  Qed.
-\`\`\`
-
-Query from user:
-Your code produces an error in the line Fixpoint replicate (x: X) (n: nat): list X :=\n{}Can you please explain what this error means? Let's think step by step. Please rewrite all code if you rewrite any code.
-File \"./ex.v\", line 4, characters 24-25:\nError: The reference X was not found in the current environment.
-
-Response from assistant:
-\`\`\`
+"""
+initialFeedback = """Your code produces an error in the line Fixpoint replicate (x: X) (n: nat): list X :=\n{{}}Can you please explain what this error means? Let's think step by step. Please rewrite all code if you rewrite any code.
+File \"./ex.v\", line 4, characters 24-25:\nError: The reference X was not found in the current environment."""
+initialRevision = """
 Require Import Coq.Lists.List. 
  Open Scope list_scope. 
  Import ListNotations. 
- Fixpoint replicate '{X: Type'} (x: X) (n: nat): list X := 
+ Fixpoint replicate {{X: Type}} (x: X) (n: nat): list X := 
  match n with 
  | 0 => []
  | S n => x :: replicate x n 
@@ -168,16 +180,50 @@ Require Import Coq.Lists.List.
  - simpl. reflexivity.
 - simpl. rewrite IHn. reflexivity.
  Qed.
-\`\`\`"""
+"""
+initialInstruction = ""
 
-messages=[{"role": "system", "content": systemText}]
+messages = {
+    "instruction": initialInstruction,
+    "task": initialTask,
+    "attempt": initialAttempt,
+    "feedback": initialFeedback,
+    "revision": initialRevision
+}
 
-def add_to_memory(resp):
-  # make sure we are uner the token limit.
-  # remove earlier model/user interactions, not the system text
-  if len(messages) > 5:
-    _ = messages.pop(1)
-  messages.append(resp)
+def generate_response(messages: dict, *, model: model, tokenizer: tokenizer, 
+                      do_sample: bool = True, max_new_tokens: int = 256, top_p: float = 0.92, top_k: int = 0, **kwargs) -> str:
+    # input_ids = tokenizer(PROMPT_FORMAT.format(instruction=instruction), return_tensors="pt").input_ids.to("cuda")
+    input_ids = tokenizer(systemText.format(
+                                        task = messages["task"],
+                                        attempt = messages["attempt"],
+                                        feedback = messages["feedback"],
+                                        revision = messages["revision"],
+                                        instruction=messages["instruction"]), 
+                          return_tensors="pt").input_ids.to("cuda")
+
+    # each of these is encoded to a single token
+    response_key_token_id = tokenizer.encode("### Response:")[0]
+    end_key_token_id = tokenizer.encode("### End")[0]
+
+    gen_tokens = model.generate(input_ids, pad_token_id=tokenizer.pad_token_id, eos_token_id=end_key_token_id,
+                                do_sample=do_sample, max_new_tokens=max_new_tokens, top_p=top_p, top_k=top_k, **kwargs)[0].cpu()
+
+    # find where the response begins
+    response_positions = np.where(gen_tokens == response_key_token_id)[0]
+
+    if len(response_positions) >= 0:
+        response_pos = response_positions[0]
+        
+        # find where the response ends
+        end_pos = None
+        end_positions = np.where(gen_tokens == end_key_token_id)[0]
+        if len(end_positions) > 0:
+            end_pos = end_positions[0]
+
+        return tokenizer.decode(gen_tokens[response_pos + 1 : end_pos]).strip()
+
+    return None
   
 def passes_testcases(resp):
   '''
@@ -185,34 +231,24 @@ def passes_testcases(resp):
   '''
   return True
 
-@retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(20)) #wait_random_exponential(min=20, max=50)
 def generate(q):
-    '''
-    Generate output from the correct model and clean it from pre- and post- rambles if possible.
-    ''' 
-    # make this script retry if the connection is rejected for some reason
-    add_to_memory({"role": "user", "content": q})
-    print("the length of the messages dict: {}".format(len(messages)))
-    response = openai.ChatCompletion.create(
-                        model='gpt-3.5-turbo', 
-                        messages=messages)
-    response = response.choices[0].message.content
-
-    # clean the response if possible
-    c_response = response
-    try:
-        match = re.search('```coq(.*?)```', c_response, re.DOTALL)
-        c_response = match.group(1)
-    except:
-        pass
-    try:
-        match = re.search('```(.*?)```', c_response, re.DOTALL)
-        c_response = match.group(1)
-    except:
-        pass
-    
-    add_to_memory({"role": "assistant", "content": response})
-    return c_response
+  '''
+  Generate output from the correct model and clean it from pre- and post- rambles if possible.
+  ''' 
+  # make this script retry if the connection is rejected for some reason
+  messages["instruction"] = q
+  response = generate_response(messages, model=model, tokenizer=tokenizer) 
+  
+  # clean the response if possible
+  c_response = response
+  try:
+    # Find last "### Response:" and get the code following it
+    c_response = c_response.rsplit("### Response:", 1)[-1]
+    # Remove leading and trailing whitespaces
+    c_response = c_response.strip()
+  except:
+    pass
+  return c_response
 
 def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   '''
@@ -226,7 +262,11 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
     print("The task: {}".format(q))
 
   for t in range(ntrials): 
+    print(messages)
     passchecks = False
+    revision = ""
+    feedback = ""
+    
     # for recording the dataset
     out = {
             "prompt_id": pid,
@@ -243,9 +283,15 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
 
     # generate model response
     response = generate(q)
+    messages["attempt"] = revision
+    messages["revision"] = response
+    messages["task"] = q_core
+    revision = response
 
     # get compiler feedback
     cf = cfeedback(response)
+    messages["feedback"] = feedback
+    messages["revision"] = revision
 
     if verbose:
       print("-----Attempt {}---------".format(t))
@@ -258,8 +304,10 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
       linetxt = get_line(line_number + 1, response)
 
       # get the model to reflect on the error
+      # PREVIOUSLY: Can you please explain what this error means? Let's think step by step. Please rewrite all code if you rewrite any code.
       q = "Your code produces an error in the line {}: {}\n{}Can you please explain what this error means? Let's think step by step. Please rewrite all code if you rewrite any code."\
         .format(line_number + 1, linetxt, cf)
+      feedback = q
       if verbose:
         print(q)
         print(percent_compiled)
@@ -304,9 +352,15 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   return None
 
 if __name__ == "__main__":
-  outfile = "gpt3-5_coqMBPPTest01.ndjson"
+  outfile = "dolly_coqMBPPTest02.ndjson"
   # run_trial(q, 0, outfile)
   for i in range(len(dataset)):
-    messages=[{"role": "system", "content": systemText}]
+    messages = {
+      "instruction": initialInstruction,
+      "task": initialTask,
+      "attempt": initialAttempt,
+      "feedback": initialFeedback,
+      "revision": initialRevision
+    }
     q = dataset[i]['query'] 
     run_trial(q, i, outfile)
