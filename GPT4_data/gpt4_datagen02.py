@@ -80,7 +80,7 @@ def build_dataset(dataset_name):
     return ds
 
 # We retrieve the dataloader by calling the `build_dataset` function.
-dataset = build_dataset("../MBPP dataset/MBPP_Coq_Train.csv")
+dataset = build_dataset("../MBPP dataset/MBPP_Coq_Test.csv")
 
 systemText = """ You are an AI assistant helping users write Coq code in order to implement given function specifications. 
 1. The program you write should only contain Coq code in response to the given function specification. 
@@ -297,7 +297,7 @@ def run_trial(q_core, pid, outfile, verbose=True, ntrials=10):
   return None
 
 if __name__ == "__main__":
-  outfile = "gpt4_coqMBPPTrain01.ndjson"
+  outfile = "gpt4_coqMBPPTest06.ndjson"
   # run_trial(q, 0, outfile)
   for i in range(len(dataset)):
     messages=[{"role": "system", "content": systemText}]
