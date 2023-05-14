@@ -1,0 +1,104 @@
+{
+    "os": "Linux-5.15.0-48-generic-x86_64-with-glibc2.35",
+    "python": "3.9.16",
+    "heartbeatAt": "2023-05-14T01:57:09.259586",
+    "startedAt": "2023-05-14T01:57:04.005243",
+    "docker": null,
+    "cuda": null,
+    "args": null,
+    "state": "running",
+    "program": "<python with no main file>",
+    "git": {
+        "remote": "https://github.com/ChloeL19/RLVF.git",
+        "commit": "5215a35ae9b14e764c2807cb705332b91e38b97b"
+    },
+    "email": "cloughridge@college.harvard.edu",
+    "root": "/home/chloe/RLVF",
+    "host": "kingman",
+    "username": "chloe",
+    "executable": "/home/chloe/mambaforge/envs/python3.9/bin/python",
+    "cpu_count": 6,
+    "cpu_count_logical": 12,
+    "cpu_freq": {
+        "current": 1900.0127499999999,
+        "min": 1200.0,
+        "max": 4000.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 1200.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 1200.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 1200.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 2600.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 2600.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 1200.153,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 4000.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 2600.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 2600.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 1200.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 1200.0,
+            "min": 1200.0,
+            "max": 4000.0
+        },
+        {
+            "current": 1200.0,
+            "min": 1200.0,
+            "max": 4000.0
+        }
+    ],
+    "disk": {
+        "total": 901.5211601257324,
+        "used": 56.205135345458984
+    },
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 3090",
+            "memory_total": 25769803776
+        }
+    ],
+    "memory": {
+        "total": 125.7055778503418
+    }
+}
